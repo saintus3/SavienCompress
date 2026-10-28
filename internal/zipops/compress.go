@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Options struct {
@@ -61,11 +62,11 @@ func Compress(input, output string, opts Options) error {
 		if err != nil {
 			return err
 		}
-		rel, err := filepath.Rel(source, target)
+		inside, err := withinDirectory(source, target)
 		if err != nil {
 			return err
 		}
-		if rel == "." || filepath.IsLocal(rel) {
+		if inside {
 			return fmt.Errorf("output must be outside the input directory")
 		}
 	}
@@ -128,6 +129,9 @@ func compressInput(zw *zip.Writer, input string, info fs.FileInfo, opts Options)
 			return err
 		}
 		header.Name = name
+		if _, err := entryPath(header.Name); err != nil {
+			return fmt.Errorf("unsupported input name: %w", err)
+		}
 		if info.IsDir() {
 			header.Name += "/"
 		} else {
@@ -152,4 +156,16 @@ func compressInput(zw *zip.Writer, input string, info fs.FileInfo, opts Options)
 		}
 		return closeErr
 	})
+}
+
+func withinDirectory(source, target string) (bool, error) {
+	// Different Windows drives or UNC shares cannot contain one another.
+	if !strings.EqualFold(filepath.VolumeName(source), filepath.VolumeName(target)) {
+		return false, nil
+	}
+	rel, err := filepath.Rel(source, target)
+	if err != nil {
+		return false, err
+	}
+	return rel == "." || filepath.IsLocal(rel), nil
 }
